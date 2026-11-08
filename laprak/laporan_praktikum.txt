@@ -1,0 +1,1737 @@
+==============================================================================
+LAPORAN PRAKTIKUM STRUKTUR DATA - QUEUE
+==============================================================================
+Nama  : Adhwa' Zahra Prasesti
+NIM   : 109102500002
+Prodi : S1 Sains Data, Fakultas Informatika, Telkom University
+
+ISI LAPORAN
+  BAGIAN A. Analisis Soal 1 (Sistem Sortir dan Pengiriman Paket)
+  BAGIAN B. Analisis Soal 2 (Buffer Pencatatan Hasil Ukur)
+  BAGIAN C. Kode Sumber Soal 1
+  BAGIAN D. Kode Sumber Soal 2
+  BAGIAN E. Masukan dan Keluaran Seluruh Uji
+  BAGIAN F. Cara Kompilasi
+
+Catatan: tidak ada std::queue, std::deque, std::list, atau std::vector yang
+dipakai. Semua kode dikompilasi tanpa warning (-Wall -Wextra) dan dijalankan
+juga dengan AddressSanitizer, UBSan, dan LeakSanitizer tanpa temuan.
+
+
+==============================================================================
+BAGIAN A. ANALISIS SOAL 1 - SISTEM SORTIR DAN PENGIRIMAN PAKET
+==============================================================================
+
+A.1 Struktur program
+--------------------
+Dua antrean A (menunggu sortir) dan B (siap kirim) dibuat dari dua singly
+linked list, masing-masing punya head (depan) dan tail (belakang).
+  - paket.h   : deklarasi ADT (struct Paket, struct Queue, semua prototipe)
+  - paket.cpp : implementasi createQueue, isEmptyQueue, alokasi, dealokasi,
+                enqueue, dequeue, findElm, fFindElm, nbList, printInfo, delAll
+                (fungsi bantu: posisi, totalBerat, cekInvarian)
+  - main.cpp  : pembaca perintah, validasi, dan statistik terkirim
+
+A.2 Analisis biaya waktu PINDAH n, KIRIM n, dan CARI
+----------------------------------------------------
+Notasi: |A| = jumlah paket di A, |B| = jumlah paket di B,
+        n = parameter perintah.
+
+Operasi dasar:
+  - enqueue : O(1). Memakai tail, hanya mengubah tail->next dan tail.
+  - dequeue : O(1). Memakai head, hanya mengubah head (dan tail bila kosong).
+
+PINDAH n : O(|A| + n)
+  - Validasi memanggil nbList(A) untuk memastikan n <= isi A. nbList menelusuri
+    seluruh A, sehingga biayanya O(|A|).
+  - Pemindahan dilakukan n kali, tiap kali 1 dequeue(A) + 1 enqueue(B), yaitu
+    O(1) per paket, jadi O(n) seluruhnya.
+  - Karena n <= |A|, total O(|A|). Bila nbList diganti penghitung jumlah yang
+    disimpan di struct Queue, validasi menjadi O(1) dan PINDAH n menjadi O(n).
+
+KIRIM n : O(|B| + n)
+  - Validasi nbList(B) berbiaya O(|B|).
+  - n kali dequeue(B), cetak, perbarui statistik, dan dealokasi (delete),
+    semuanya O(1) per paket, jadi O(n).
+  - Karena n <= |B|, total O(|B|).
+
+CARI kode : O(|A| + |B|) pada kasus terburuk
+  - findElm menelusuri A secara linear; bila tidak ketemu, dilanjutkan ke B.
+  - Setelah ketemu, posisi dihitung dengan menelusuri antrean dari depan,
+    biayanya O(posisi).
+  - Kasus terburuk adalah kode yang tidak ada (kedua antrean ditelusuri
+    penuh). Kasus terbaik O(1) bila kode ada di paling depan A.
+
+Tambahan: MASUK berbiaya O(|A| + |B|) karena harus memeriksa keunikan kode di
+kedua antrean dengan findElm; enqueue-nya sendiri O(1).
+
+Tabel ringkas:
+  +-----------+------------------+-------------------------------------------+
+  | Operasi   | Biaya            | Sumber biaya                              |
+  +-----------+------------------+-------------------------------------------+
+  | enqueue   | O(1)             | akses tail                                |
+  | dequeue   | O(1)             | akses head                                |
+  | PINDAH n  | O(|A| + n)       | nbList(A) + n kali (dequeue + enqueue)    |
+  | KIRIM n   | O(|B| + n)       | nbList(B) + n kali (dequeue + delete)     |
+  | CARI      | O(|A| + |B|)     | pencarian linear di A lalu B              |
+  | MASUK     | O(|A| + |B|)     | cek kode unik di A dan B                  |
+  +-----------+------------------+-------------------------------------------+
+
+A.3 Menelusuri satu perpindahan node
+------------------------------------
+Kasus: PINDAH 1 saat A = P17 -> P28 -> P36 dan B kosong.
+
+Keadaan awal:
+  A.head = &P17, A.tail = &P36, B.head = B.tail = nullptr.
+
+Langkah 1 - dequeue(A):
+  - P = A.head              (P menunjuk node P17)
+  - A.head = P->next        (A.head menunjuk node P28)
+  - A.head tidak nullptr, jadi A.tail tidak berubah (tetap &P36)
+  - P->next = nullptr       (node P17 putus dari P28)
+  - P dikembalikan. Node P17 sekarang tidak tersambung ke queue mana pun.
+
+Langkah 2 - enqueue(B, P):
+  - P tidak nullptr dan P->next == nullptr, sehingga lolos pemeriksaan.
+  - B kosong, jadi B.head = P dan B.tail = P.
+
+Keadaan akhir:
+  A = P28 -> P36, B = P17.
+  Tidak ada new maupun delete. Alamat node P17 tidak berubah; ini dibuktikan
+  perintah ALAMAT (alamat sama sebelum dan sesudah PINDAH, tetapi
+  fFindElm(A) berubah dari "ya" menjadi "tidak" dan fFindElm(B) dari "tidak"
+  menjadi "ya").
+
+Kasus node terakhir A:
+  Bila node yang dipindah adalah satu-satunya node di A, maka pada dequeue
+  A.head menjadi nullptr, lalu A.tail juga diisi nullptr. Dengan begitu A
+  kembali ke keadaan kosong baku (head = tail = nullptr).
+
+A.4 Pencegahan kebocoran memori
+-------------------------------
+  1. Setiap new (di alokasi) berpasangan dengan tepat satu delete (di
+     dealokasi). Pembebasan terjadi pada KIRIM, BERSIHKAN, SELESAI, dan akhir
+     input (delAll dipanggil lagi di akhir main, aman dipanggil berulang).
+  2. PINDAH tidak membuat dan tidak menghapus node; ia hanya menyambung ulang
+     pointer. Jumlah node total (|A| + |B|) tidak berubah.
+  3. Bila enqueue gagal setelah alokasi (pada MASUK), node langsung
+     dibebaskan sebelum perintah ditolak.
+  4. Seluruh validasi (n positif, n <= isi antrean sumber, berat, panjang
+     kode, keunikan kode) dilakukan SEBELUM struktur diubah. Tidak ada
+     pemrosesan sebagian, sehingga tidak ada node yang tertinggal di
+     keadaan setengah jadi.
+  5. delAll membebaskan node satu per satu lewat dequeue + dealokasi sehingga
+     tidak ada node yang terlewat.
+  6. Dibuktikan dengan LeakSanitizer: tidak ada kebocoran, termasuk setelah
+     BERSIHKAN dan SELESAI dengan sisa node di antrean.
+
+A.5 Pencegahan pelepasan node dua kali (double delete)
+------------------------------------------------------
+  1. dealokasi(adrPaket& P) menerima pointer secara by reference dan mengisi
+     P = nullptr setelah delete. Pemanggilan dealokasi kedua pada variabel
+     yang sama hanya menemukan nullptr dan tidak melakukan apa-apa.
+  2. Node hanya di-delete setelah dilepas oleh dequeue, sehingga pada saat
+     dibebaskan node tidak lagi bisa dijangkau dari head atau tail mana pun.
+     KIRIM dan delAll selalu memakai urutan dequeue lalu dealokasi.
+  3. Data (kode dan berat) dicatat ke statistik SEBELUM dealokasi, sehingga
+     alamat yang sudah dibebaskan tidak pernah diakses (tidak ada
+     use-after-free).
+  4. dequeue mengisi next = nullptr dan enqueue menolak node yang next-nya
+     bukan nullptr atau yang sudah menjadi tail. Dengan begitu satu node
+     hanya menjadi anggota satu queue pada satu waktu. Hal ini diperiksa oleh
+     perintah CEK (head/tail konsisten, tail->next = nullptr, dan tidak ada
+     node yang berada di A dan B sekaligus).
+
+
+==============================================================================
+BAGIAN B. ANALISIS SOAL 2 - BUFFER PENCATATAN HASIL UKUR
+==============================================================================
+
+B.1 Struktur program
+--------------------
+  - buffer.h       : ADT dan antarmuka fungsi yang SAMA untuk ketiga versi
+                     (versi dipilih saat kompilasi dengan -DVERSI=1/2/3)
+  - buffer_v1.cpp  : array geser (head, tail)
+  - buffer_v2.cpp  : array dengan pemadatan (head, tail)
+  - buffer_v3.cpp  : circular queue (head, count, tanpa tail)
+  - main.cpp       : SATU file yang sama untuk ketiga versi
+
+B.2 Analisis biaya waktu satu enqueue, satu dequeue, dan satu batch k
+---------------------------------------------------------------------
+Notasi: N = kapasitas buffer (6), k = ukuran batch (1..6).
+
+VERSI 1 - Array geser
+  - enqueue : O(1). Tulis di indeks tail+1.
+  - dequeue : O(N). Setelah mengambil data indeks 0, semua data sesudahnya
+              (sampai N-1 rekaman) digeser satu tempat ke kiri agar head
+              tetap 0.
+  - batch TULIS k : O(k)      (k kali enqueue, masing-masing O(1))
+  - batch AMBIL k : O(k * N)  (k kali dequeue, masing-masing O(N))
+
+VERSI 2 - Array dengan pemadatan
+  - enqueue : O(1) pada umumnya. Pada saat pemadatan (enqueue butuh ruang
+              dan tail sudah di indeks 5 sementara head > 0) biayanya O(N)
+              karena seluruh data aktif digeser ke awal.
+  - dequeue : O(1). Hanya memajukan head.
+  - batch TULIS k : O(k + N). Pemadatan paling banyak terjadi satu kali per
+                    batch, karena ruang batch sudah divalidasi dan setelah
+                    pemadatan tail turun ke posisi n sehingga sisa penulisan
+                    muat tanpa pemadatan lagi.
+  - batch AMBIL k : O(k)
+
+VERSI 3 - Circular queue
+  - enqueue : O(1). Posisi tulis (head + count) mod 6.
+  - dequeue : O(1). head = (head + 1) mod 6.
+  - batch TULIS k : O(k)
+  - batch AMBIL k : O(k)
+
+Tabel ringkas:
+  +-----------------+-----------+-------------+---------------+-------------+
+  | Versi           | 1 enqueue | 1 dequeue   | TULIS k       | AMBIL k     |
+  +-----------------+-----------+-------------+---------------+-------------+
+  | 1. Array geser  | O(1)      | O(N)        | O(k)          | O(k * N)    |
+  | 2. Pemadatan    | O(1)/O(N) | O(1)        | O(k + N)      | O(k)        |
+  | 3. Circular     | O(1)      | O(1)        | O(k)          | O(k)        |
+  +-----------------+-----------+-------------+---------------+-------------+
+  (versi 2, enqueue: O(N) hanya saat pemadatan)
+
+Karena N = 6 adalah konstanta, secara formal semuanya O(1). Perbedaannya baru
+terasa bila kapasitas diperbesar, dan sudah terlihat pada penghitung
+pergeseran (9, 4, 0).
+
+B.3 Asal angka pergeseran 9, 4, dan 0
+-------------------------------------
+Urutan uji utama: TULIS 6 -> AMBIL 2 -> TULIS 3 (ditolak) -> TULIS 2.
+
+Versi 1 (9):
+  head harus selalu 0, jadi setiap dequeue menggeser semua sisa data.
+  - AMBIL 2, dequeue pertama : buffer berisi 6, sisa 5 digeser -> 5
+  - AMBIL 2, dequeue kedua   : buffer berisi 5, sisa 4 digeser -> 4
+  - TULIS 2 9 -2             : tail di indeks 3, ruang ada di kanan -> 0
+  - Total 5 + 4 = 9
+
+Versi 2 (4):
+  dequeue hanya memajukan head (head = 2, tail = 5) sehingga AMBIL 2 tidak
+  menggeser apa pun. Pergeseran terjadi pada TULIS 2 9 -2: penulisan pertama
+  menemukan tail = 5 dan head = 2 > 0, sehingga 4 rekaman aktif (3:7, 4:0,
+  5:15, 6:6) dipadatkan ke indeks 0-3 -> 4. Setelah itu tail = 3; rekaman
+  7:9 masuk ke indeks 4 dan 8:-2 ke indeks 5 tanpa pergeseran lagi.
+  Total 4.
+
+Versi 3 (0):
+  Tidak ada rekaman yang dipindahkan. head maju dengan (head + 1) mod 6 dan
+  posisi tulis dihitung (head + count) mod 6. Ruang kosong di depan langsung
+  dipakai ulang secara melingkar (7:9 dan 8:-2 masuk ke indeks 0 dan 1).
+  Total 0.
+
+B.4 Perbandingan keluaran ketiga versi
+--------------------------------------
+Pada input uji utama yang sama:
+  - Isi FIFO, nomor urut, pesan penolakan, dan hasil RINGKAS IDENTIK di ketiga
+    versi (jumlah 6; total 35; minimum -2; maksimum 15; rata-rata 5.83).
+  - Hanya posisi fisik, penanda, dan total pergeseran yang berbeda:
+
+  Versi 1: Fisik [0]=3:7 [1]=4:0 [2]=5:15 [3]=6:6 [4]=7:9 [5]=8:-2
+           head = 0, tail = 5, pergeseran 9
+  Versi 2: Fisik [0]=3:7 [1]=4:0 [2]=5:15 [3]=6:6 [4]=7:9 [5]=8:-2
+           head = 0, tail = 5, pergeseran 4
+  Versi 3: Fisik [0]=7:9 [1]=8:-2 [2]=3:7 [3]=4:0 [4]=5:15 [5]=6:6
+           head = 2, count = 6, pergeseran 0
+
+Pembandingan otomatis (lihat BAGIAN E): keluaran v1 = v2 = v3 pada uji
+tertulis, dan juga pada 300 skenario acak (+-60 perintah per skenario,
+termasuk masukan tidak valid).
+
+B.5 Analisis FIFO
+-----------------
+Ketiga versi menulis di belakang dan mengambil dari depan. Depan berada di
+indeks 0 (v1), indeks head (v2), atau indeks head yang berputar (v3). Nomor
+urut hanya bertambah di dalam enqueue yang berhasil (nextNo++), sehingga
+rekaman selalu keluar dalam urutan nomor menaik (1, 2, lalu 3, 4, 5, 6, 7,
+8). Walaupun posisi fisik berbeda (v3 berputar), urutan logis yang diambil
+lewat elemenKe selalu sama. Terbukti pada AMBIL 6 yang mengeluarkan
+3:7, 4:0, 5:15, 6:6, 7:9, 8:-2.
+
+B.6 Analisis batas antrean
+--------------------------
+Kapasitas 6 rekaman.
+  +-------+------------------+-----------------------------------------------+
+  | Versi | Kosong           | Penuh                                         |
+  +-------+------------------+-----------------------------------------------+
+  | 1     | head = tail = -1 | tail = 5 (head selalu 0)                      |
+  | 2     | head = tail = -1 | tail = 5 DAN head = 0 (bila head > 0 masih    |
+  |       |                  | ada ruang yang bisa dipadatkan)               |
+  | 3     | head = count = 0 | count = 6                                     |
+  +-------+------------------+-----------------------------------------------+
+
+Seluruh batch divalidasi SEBELUM queue diubah: k harus 1-6, jumlah nilai harus
+tepat k, tiap nilai harus dalam -1000..1000, dan ruang kosong (untuk TULIS)
+atau data (untuk AMBIL) harus cukup. Akibatnya perintah yang ditolak tidak
+mengubah isi, tidak menggeser penanda, tidak menghabiskan nomor urut, dan
+tidak menambah penghitung pergeseran. Terbukti pada AMBIL 7 (data tetap
+utuh) dan TULIS 2 4 1001 (nomor berikutnya tetap 9, lalu TULIS 1 -1
+bernomor 9).
+
+B.7 Analisis pengelolaan memori dan indeks
+------------------------------------------
+Memori: Soal 2 tidak memakai alokasi dinamis (tanpa new/delete). Seluruh data
+berada di array data[6] berukuran tetap di dalam struct Buffer, sehingga
+tidak ada risiko kebocoran memori. Diperiksa juga dengan AddressSanitizer dan
+UBSan tanpa temuan.
+
+Indeks: dijaga selalu di rentang 0-5.
+  - v1: head dijaga 0 dengan menggeser data; tail hanya naik sampai 5.
+  - v2: data aktif ada di [head..tail]. Indeks di luar rentang itu dianggap
+        kosong walaupun masih menyimpan data lama; data lama tidak pernah
+        dibaca.
+  - v3: semua perhitungan indeks memakai modulo 6 sehingga tidak pernah keluar
+        rentang. Posisi tulis (head + count) mod 6 dan indeks rekaman terakhir
+        (head + count - 1) mod 6 dihitung saat diperlukan, tidak disimpan
+        sebagai tail.
+  - Saat kosong, penanda dikembalikan ke keadaan kosong baku (v1/v2: -1,
+    v3: 0) sehingga pengosongan lewat AMBIL dan lewat KOSONGKAN memberi
+    keadaan yang sama. KOSONGKAN tidak mengulang nextNo maupun penghitung
+    pergeseran.
+
+==============================================================================
+BAGIAN C. KODE SUMBER SOAL 1
+==============================================================================
+
+------------------------------------------------------------------------------
+FILE: soal1/paket.h
+------------------------------------------------------------------------------
+// ============================================================
+// Soal 1 - Sistem Sortir dan Pengiriman Paket (ADT Queue, SLL)
+// Nama: Adhwa' Zahra Prasesti  NIM: 109102500002
+// File : paket.h  (deklarasi ADT)
+// ============================================================
+#ifndef PAKET_H
+#define PAKET_H
+
+#include <string>
+
+// Node paket: sekaligus elemen singly linked list.
+struct Paket {
+    std::string kode;   // satu kata, 1-10 karakter
+    int berat;          // 1-5000 gram
+    Paket* next;        // penunjuk ke node berikutnya
+};
+typedef Paket* adrPaket;
+
+// Queue = singly linked list dengan head (depan) dan tail (belakang).
+struct Queue {
+    adrPaket head;
+    adrPaket tail;
+};
+
+// ---- operasi wajib ----
+void     createQueue(Queue& Q);                          // head = tail = nullptr
+bool     isEmptyQueue(const Queue& Q);                   // true jika kosong
+adrPaket alokasi(const std::string& kode, int berat);    // nullptr jika gagal
+void     dealokasi(adrPaket& P);                         // delete, lalu P = nullptr
+bool     enqueue(Queue& Q, adrPaket P);                  // sambung node ke belakang
+adrPaket dequeue(Queue& Q);                              // lepas node depan (tanpa delete)
+adrPaket findElm(const Queue& Q, const std::string& kode);   // cari berdasar kode
+bool     fFindElm(const Queue& Q, adrPaket P);           // cari berdasar ALAMAT node
+int      nbList(const Queue& Q);                         // jumlah node
+void     printInfo(const Queue& Q);                      // cetak dari depan
+void     delAll(Queue& Q);                               // bebaskan semua node
+
+// ---- fungsi bantu ----
+int      posisi(const Queue& Q, adrPaket P);             // posisi mulai 1, 0 jika tidak ada
+long     totalBerat(const Queue& Q);                     // jumlah berat seluruh node
+bool     cekInvarian(const Queue& Q);                    // periksa head/tail/tail->next
+
+#endif
+
+------------------------------------------------------------------------------
+FILE: soal1/paket.cpp
+------------------------------------------------------------------------------
+// Nama: Adhwa' Zahra Prasesti  NIM: 109102500002
+// File : paket.cpp  (implementasi ADT)
+#include "paket.h"
+#include <iostream>
+#include <new>
+
+void createQueue(Queue& Q) {
+    Q.head = nullptr;
+    Q.tail = nullptr;
+}
+
+bool isEmptyQueue(const Queue& Q) {
+    return Q.head == nullptr;
+}
+
+adrPaket alokasi(const std::string& kode, int berat) {
+    adrPaket P = new (std::nothrow) Paket;   // tidak melempar exception
+    if (P != nullptr) {
+        P->kode = kode;
+        P->berat = berat;
+        P->next = nullptr;                   // node baru tidak tersambung ke mana pun
+    }
+    return P;
+}
+
+void dealokasi(adrPaket& P) {
+    if (P != nullptr) {
+        delete P;
+        P = nullptr;                         // cegah pemakaian / delete kedua
+    }
+}
+
+// Menyambung node yang SUDAH dialokasikan ke belakang queue. O(1).
+bool enqueue(Queue& Q, adrPaket P) {
+    if (P == nullptr) return false;          // tidak ada node
+    if (P->next != nullptr) return false;    // node masih tersambung ke list lain
+    if (Q.tail == P) return false;           // node yang sama sudah di belakang
+    if (isEmptyQueue(Q)) {
+        Q.head = P;
+        Q.tail = P;
+    } else {
+        Q.tail->next = P;
+        Q.tail = P;
+    }
+    return true;
+}
+
+// Melepas node depan TANPA delete. next node lepas = nullptr. O(1).
+adrPaket dequeue(Queue& Q) {
+    if (isEmptyQueue(Q)) return nullptr;
+    adrPaket P = Q.head;
+    Q.head = P->next;
+    if (Q.head == nullptr) {
+        Q.tail = nullptr;                    // queue menjadi kosong: head = tail = nullptr
+    }
+    P->next = nullptr;                       // node lepas total dari queue
+    return P;
+}
+
+adrPaket findElm(const Queue& Q, const std::string& kode) {
+    for (adrPaket P = Q.head; P != nullptr; P = P->next) {
+        if (P->kode == kode) return P;
+    }
+    return nullptr;
+}
+
+// Keanggotaan berdasarkan alamat (bukan isi): dipakai untuk membuktikan
+// bahwa alamat node tetap, tetapi keanggotaan queue berubah setelah PINDAH.
+bool fFindElm(const Queue& Q, adrPaket P) {
+    if (P == nullptr) return false;
+    for (adrPaket C = Q.head; C != nullptr; C = C->next) {
+        if (C == P) return true;
+    }
+    return false;
+}
+
+int nbList(const Queue& Q) {
+    int n = 0;
+    for (adrPaket P = Q.head; P != nullptr; P = P->next) ++n;
+    return n;
+}
+
+void printInfo(const Queue& Q) {
+    if (isEmptyQueue(Q)) {
+        std::cout << "(kosong)";
+        return;
+    }
+    for (adrPaket P = Q.head; P != nullptr; P = P->next) {
+        std::cout << P->kode << "(" << P->berat << "g)";
+        if (P->next != nullptr) std::cout << " -> ";
+    }
+}
+
+void delAll(Queue& Q) {
+    while (!isEmptyQueue(Q)) {
+        adrPaket P = dequeue(Q);
+        dealokasi(P);
+    }
+}
+
+int posisi(const Queue& Q, adrPaket P) {
+    int pos = 1;
+    for (adrPaket C = Q.head; C != nullptr; C = C->next, ++pos) {
+        if (C == P) return pos;
+    }
+    return 0;
+}
+
+long totalBerat(const Queue& Q) {
+    long t = 0;
+    for (adrPaket P = Q.head; P != nullptr; P = P->next) t += P->berat;
+    return t;
+}
+
+bool cekInvarian(const Queue& Q) {
+    if (Q.head == nullptr) return Q.tail == nullptr;     // kosong: head = tail = nullptr
+    if (Q.tail == nullptr) return false;
+    adrPaket P = Q.head;
+    int langkah = 0;
+    while (P->next != nullptr) {
+        P = P->next;
+        if (++langkah > 1000000) return false;           // jaga-jaga siklus
+    }
+    return P == Q.tail && Q.tail->next == nullptr;       // tail = node terakhir
+}
+
+------------------------------------------------------------------------------
+FILE: soal1/main.cpp
+------------------------------------------------------------------------------
+// Nama: Adhwa' Zahra Prasesti  NIM: 109102500002
+// File : main.cpp  (program utama Soal 1)
+// Pemakaian: ./paket [--echo] < input.txt
+//   --echo  : mencetak ulang setiap perintah (berguna untuk log pengujian)
+#include <iostream>
+#include <string>
+#include <sstream>
+#include <cctype>
+#include "paket.h"
+
+namespace {
+
+const int MAXTOK = 8;
+
+struct Statistik {
+    long jumlah;   // paket terkirim
+    long berat;    // total gram terkirim
+};
+
+// Memecah baris menjadi token. Mengembalikan jumlah token sebenarnya.
+int splitTokens(const std::string& line, std::string tok[], int maxTok) {
+    std::istringstream iss(line);
+    std::string t;
+    int n = 0;
+    while (iss >> t) {
+        if (n < maxTok) tok[n] = t;
+        ++n;
+    }
+    return n;
+}
+
+// Membaca bilangan bulat ketat (hanya [+-]digit). Nilai sangat besar dijenuhkan.
+bool parseInt(const std::string& s, long& out) {
+    if (s.empty()) return false;
+    std::size_t i = 0;
+    bool neg = false;
+    if (s[0] == '+' || s[0] == '-') { neg = (s[0] == '-'); i = 1; }
+    if (i >= s.size()) return false;
+    long v = 0;
+    int digits = 0;
+    for (; i < s.size(); ++i) {
+        if (!std::isdigit(static_cast<unsigned char>(s[i]))) return false;
+        if (v == 0 && s[i] == '0') continue;          // abaikan nol di depan
+        if (digits < 9) v = v * 10 + (s[i] - '0');
+        ++digits;
+    }
+    if (digits > 9) v = 1000000000L;
+    out = neg ? -v : v;
+    return true;
+}
+
+void cmdMasuk(Queue& A, const Queue& B, const std::string tok[], int n) {
+    if (n != 3) { std::cout << "DITOLAK: format MASUK kode berat\n"; return; }
+    const std::string& kode = tok[1];
+    if (kode.size() < 1 || kode.size() > 10) {
+        std::cout << "DITOLAK: kode harus 1-10 karakter\n"; return;
+    }
+    long berat;
+    if (!parseInt(tok[2], berat) || berat < 1 || berat > 5000) {
+        std::cout << "DITOLAK: berat harus bilangan bulat 1-5000 gram\n"; return;
+    }
+    if (findElm(A, kode) != nullptr) {
+        std::cout << "DITOLAK: kode " << kode << " masih aktif di antrean A\n"; return;
+    }
+    if (findElm(B, kode) != nullptr) {
+        std::cout << "DITOLAK: kode " << kode << " masih aktif di antrean B\n"; return;
+    }
+    adrPaket P = alokasi(kode, static_cast<int>(berat));
+    if (P == nullptr) { std::cout << "DITOLAK: alokasi memori gagal\n"; return; }
+    if (!enqueue(A, P)) {
+        dealokasi(P);                                  // jangan bocor
+        std::cout << "DITOLAK: node gagal disambung ke A\n"; return;
+    }
+    std::cout << "MASUK berhasil: " << kode << " (" << berat << " gram) di belakang A\n";
+}
+
+void cmdPindah(Queue& A, Queue& B, const std::string tok[], int n) {
+    if (n != 2) { std::cout << "DITOLAK: format PINDAH n\n"; return; }
+    long k;
+    if (!parseInt(tok[1], k) || k <= 0) {
+        std::cout << "DITOLAK: n harus bilangan bulat positif\n"; return;
+    }
+    int tersedia = nbList(A);
+    if (k > tersedia) {
+        std::cout << "DITOLAK: PINDAH " << k << " melebihi isi A (A hanya berisi "
+                  << tersedia << " paket)\n";
+        return;
+    }
+    std::cout << "PINDAH berhasil: " << k << " paket A -> B:";
+    for (long i = 0; i < k; ++i) {
+        adrPaket P = dequeue(A);      // lepas dari A (alamat node tidak berubah)
+        enqueue(B, P);                // sambung ke belakang B (tidak ada new/delete)
+        std::cout << (i == 0 ? " " : ", ") << P->kode;
+    }
+    std::cout << "\n";
+}
+
+void cmdKirim(Queue& B, Statistik& st, const std::string tok[], int n) {
+    if (n != 2) { std::cout << "DITOLAK: format KIRIM n\n"; return; }
+    long k;
+    if (!parseInt(tok[1], k) || k <= 0) {
+        std::cout << "DITOLAK: n harus bilangan bulat positif\n"; return;
+    }
+    int tersedia = nbList(B);
+    if (k > tersedia) {
+        std::cout << "DITOLAK: KIRIM " << k << " melebihi isi B (B hanya berisi "
+                  << tersedia << " paket)\n";
+        return;
+    }
+    long gram = 0;
+    for (long i = 0; i < k; ++i) {
+        adrPaket P = dequeue(B);
+        std::cout << "Dikirim: " << P->kode << " (" << P->berat << " gram)\n";
+        st.jumlah += 1;
+        st.berat  += P->berat;
+        gram      += P->berat;
+        dealokasi(P);                 // data dicatat dulu, baru node dibebaskan
+    }
+    std::cout << "KIRIM berhasil: " << k << " paket, " << gram << " gram. "
+              << "Total terkirim: " << st.jumlah << " paket, " << st.berat << " gram\n";
+}
+
+void cmdCari(const Queue& A, const Queue& B, const std::string tok[], int n) {
+    if (n != 2) { std::cout << "DITOLAK: format CARI kode\n"; return; }
+    adrPaket P = findElm(A, tok[1]);
+    char lok = 'A';
+    const Queue* Q = &A;
+    if (P == nullptr) { P = findElm(B, tok[1]); lok = 'B'; Q = &B; }
+    if (P == nullptr) { std::cout << "TIDAK DITEMUKAN\n"; return; }
+    std::cout << "Ditemukan: " << P->kode << " di " << lok << ", posisi "
+              << posisi(*Q, P) << ", berat " << P->berat << " gram\n";
+}
+
+// Perintah tambahan: bukti bahwa alamat node tetap sedangkan keanggotaan berubah.
+void cmdAlamat(const Queue& A, const Queue& B, const std::string tok[], int n) {
+    if (n != 2) { std::cout << "DITOLAK: format ALAMAT kode\n"; return; }
+    adrPaket P = findElm(A, tok[1]);
+    if (P == nullptr) P = findElm(B, tok[1]);
+    if (P == nullptr) { std::cout << "TIDAK DITEMUKAN\n"; return; }
+    std::cout << "Alamat node " << tok[1] << " = " << static_cast<const void*>(P)
+              << " | fFindElm(A) = " << (fFindElm(A, P) ? "ya" : "tidak")
+              << " | fFindElm(B) = " << (fFindElm(B, P) ? "ya" : "tidak") << "\n";
+}
+
+void cmdLihat(const Queue& A, const Queue& B) {
+    std::cout << "Antrean A: "; printInfo(A); std::cout << "\n";
+    std::cout << "Antrean B: "; printInfo(B); std::cout << "\n";
+}
+
+void cmdRekap(const Queue& A, const Queue& B, const Statistik& st) {
+    std::cout << "REKAP\n";
+    std::cout << "  A        : " << nbList(A) << " paket, total berat " << totalBerat(A) << " gram\n";
+    std::cout << "  B        : " << nbList(B) << " paket, total berat " << totalBerat(B) << " gram\n";
+    std::cout << "  Terkirim : " << st.jumlah << " paket, total berat " << st.berat << " gram\n";
+}
+
+void cmdBersihkan(Queue& A, Queue& B) {
+    int a = nbList(A), b = nbList(B);
+    delAll(A);
+    delAll(B);
+    std::cout << "BERSIHKAN: " << a << " paket dari A dan " << b
+              << " paket dari B dihapus (statistik terkirim tidak berubah)\n";
+}
+
+// Perintah tambahan: verifikasi invarian struktur.
+void cmdCek(const Queue& A, const Queue& B) {
+    bool ok = cekInvarian(A) && cekInvarian(B);
+    // satu node hanya boleh menjadi anggota satu queue
+    for (adrPaket P = A.head; P != nullptr && ok; P = P->next)
+        if (fFindElm(B, P)) ok = false;
+    std::cout << "CEK invarian (head/tail, tail->next, keanggotaan tunggal): "
+              << (ok ? "OK" : "GAGAL") << "\n";
+}
+
+} // namespace
+
+int main(int argc, char* argv[]) {
+    bool echo = false;
+    for (int i = 1; i < argc; ++i)
+        if (std::string(argv[i]) == "--echo") echo = true;
+
+    Queue A, B;
+    createQueue(A);
+    createQueue(B);
+    Statistik st = {0, 0};
+
+    std::cout << "=== Sistem Sortir & Pengiriman Paket ===\n"
+              << "Perintah: MASUK kode berat | PINDAH n | KIRIM n | CARI kode | LIHAT | REKAP\n"
+              << "          BERSIHKAN | SELESAI   (tambahan: ALAMAT kode, CEK)\n";
+
+    std::string line;
+    while (std::getline(std::cin, line)) {
+        if (!line.empty() && line.back() == '\r') line.pop_back();
+        std::string tok[MAXTOK];
+        int n = splitTokens(line, tok, MAXTOK);
+        if (n == 0) continue;
+        if (tok[0][0] == '#') {                       // baris komentar
+            if (echo) std::cout << line << "\n";
+            continue;
+        }
+        if (echo) std::cout << "> " << line << "\n";
+
+        std::string cmd = tok[0];
+        for (std::size_t i = 0; i < cmd.size(); ++i)
+            cmd[i] = static_cast<char>(std::toupper(static_cast<unsigned char>(cmd[i])));
+
+        if      (cmd == "MASUK")     cmdMasuk(A, B, tok, n);
+        else if (cmd == "PINDAH")    cmdPindah(A, B, tok, n);
+        else if (cmd == "KIRIM")     cmdKirim(B, st, tok, n);
+        else if (cmd == "CARI")      cmdCari(A, B, tok, n);
+        else if (cmd == "ALAMAT")    cmdAlamat(A, B, tok, n);
+        else if (cmd == "LIHAT")     cmdLihat(A, B);
+        else if (cmd == "REKAP")     cmdRekap(A, B, st);
+        else if (cmd == "BERSIHKAN") cmdBersihkan(A, B);
+        else if (cmd == "CEK")       cmdCek(A, B);
+        else if (cmd == "SELESAI") {
+            std::cout << "SELESAI: " << (nbList(A) + nbList(B))
+                      << " node sisa dibebaskan. Program berakhir.\n";
+            break;
+        }
+        else std::cout << "DITOLAK: perintah tidak dikenal\n";
+    }
+    delAll(A);   // aman dipanggil lagi (juga bila input berakhir tanpa SELESAI)
+    delAll(B);
+    return 0;
+}
+
+==============================================================================
+BAGIAN D. KODE SUMBER SOAL 2
+==============================================================================
+
+------------------------------------------------------------------------------
+FILE: soal2/buffer.h
+------------------------------------------------------------------------------
+// ============================================================
+// Soal 2 - Buffer Pencatatan Hasil Ukur (ADT Queue kapasitas 6)
+// Nama: Adhwa' Zahra Prasesti  NIM: 109102500002
+// File : buffer.h  (deklarasi ADT, dipakai ketiga versi)
+//
+// Pilih versi saat kompilasi:  -DVERSI=1 | -DVERSI=2 | -DVERSI=3
+//   1 = array geser, 2 = array dengan pemadatan, 3 = circular queue
+// ============================================================
+#ifndef BUFFER_H
+#define BUFFER_H
+
+#ifndef VERSI
+#define VERSI 1
+#endif
+
+const int KAPASITAS = 6;
+const int NILAI_MIN = -1000;
+const int NILAI_MAX = 1000;
+
+struct Rekaman {
+    int nomor;   // nomor urut otomatis (mulai 1)
+    int nilai;   // -1000 .. 1000 (0 dan negatif sah)
+};
+
+struct Buffer {
+    Rekaman data[KAPASITAS];
+    int  head;
+#if VERSI == 3
+    int  count;       // versi 3: head + count, TIDAK ada tail
+#else
+    int  tail;        // versi 1 & 2: head + tail
+#endif
+    int  nextNo;      // nomor urut untuk rekaman berikutnya
+    long geser;       // jumlah rekaman yang dipindahkan karena pergeseran
+};
+
+// ---- antarmuka yang SAMA untuk ketiga versi ----
+const char* namaVersi();
+void createBuffer(Buffer& B);                 // kosong, nextNo = 1, geser = 0
+void kosongkan(Buffer& B);                    // kosongkan; nextNo & geser TIDAK direset
+int  jumlah(const Buffer& B);                 // banyak rekaman aktif
+int  ruangKosong(const Buffer& B);            // KAPASITAS - jumlah (ruang untuk enqueue)
+bool enqueue(Buffer& B, int nilai);           // tulis 1 rekaman; false jika penuh
+bool dequeue(Buffer& B, Rekaman& hasil);      // ambil 1 rekaman depan; false jika kosong
+Rekaman elemenKe(const Buffer& B, int i);     // rekaman FIFO ke-i (0 = depan)
+int  nomorBerikut(const Buffer& B);
+long totalGeser(const Buffer& B);
+void printFisik(const Buffer& B);             // isi tiap indeks fisik + penanda
+
+#endif
+
+------------------------------------------------------------------------------
+FILE: soal2/buffer_v1.cpp
+------------------------------------------------------------------------------
+// Nama: Adhwa' Zahra Prasesti  NIM: 109102500002
+// Versi 1 - ARRAY GESER: head selalu 0 saat berisi; dequeue menggeser sisa data ke kiri.
+#include "buffer.h"
+#include <iostream>
+#if VERSI != 1
+#error "buffer_v1.cpp harus dikompilasi dengan -DVERSI=1"
+#endif
+
+const char* namaVersi() { return "Versi 1 - Array geser"; }
+
+void createBuffer(Buffer& B) {
+    B.head = -1; B.tail = -1;
+    B.nextNo = 1; B.geser = 0;
+}
+void kosongkan(Buffer& B) { B.head = -1; B.tail = -1; }   // nextNo & geser dipertahankan
+
+int  jumlah(const Buffer& B)      { return (B.head == -1) ? 0 : B.tail - B.head + 1; }
+int  ruangKosong(const Buffer& B) { return KAPASITAS - jumlah(B); }
+
+bool enqueue(Buffer& B, int nilai) {
+    if (B.tail == KAPASITAS - 1) return false;            // penuh (head selalu 0)
+    if (B.head == -1) { B.head = 0; B.tail = 0; }         // dari kosong
+    else              { B.tail++; }
+    B.data[B.tail].nomor = B.nextNo++;
+    B.data[B.tail].nilai = nilai;
+    return true;
+}
+
+bool dequeue(Buffer& B, Rekaman& hasil) {
+    if (B.head == -1) return false;
+    hasil = B.data[0];
+    for (int i = 1; i <= B.tail; ++i) {                   // geser tiap data 1 tempat ke kiri
+        B.data[i - 1] = B.data[i];
+        B.geser++;                                        // 1 rekaman dipindahkan = 1 hitungan
+    }
+    if (B.tail == 0) { B.head = -1; B.tail = -1; }        // menjadi kosong
+    else             { B.tail--; }
+    return true;
+}
+
+Rekaman elemenKe(const Buffer& B, int i) { return B.data[B.head + i]; }
+int  nomorBerikut(const Buffer& B) { return B.nextNo; }
+long totalGeser(const Buffer& B)   { return B.geser; }
+
+void printFisik(const Buffer& B) {
+    std::cout << "Fisik:";
+    for (int i = 0; i < KAPASITAS; ++i) {
+        std::cout << " [" << i << "]=";
+        if (B.head != -1 && i >= B.head && i <= B.tail)
+            std::cout << B.data[i].nomor << ":" << B.data[i].nilai;
+        else std::cout << "kosong";
+    }
+    std::cout << "\nPenanda: head = " << B.head << ", tail = " << B.tail << "\n";
+}
+
+------------------------------------------------------------------------------
+FILE: soal2/buffer_v2.cpp
+------------------------------------------------------------------------------
+// Nama: Adhwa' Zahra Prasesti  NIM: 109102500002
+// Versi 2 - ARRAY DENGAN PEMADATAN: dequeue hanya memajukan head.
+// Data aktif digeser ke awal HANYA jika enqueue butuh ruang dan tail sudah di indeks 5.
+#include "buffer.h"
+#include <iostream>
+#if VERSI != 2
+#error "buffer_v2.cpp harus dikompilasi dengan -DVERSI=2"
+#endif
+
+const char* namaVersi() { return "Versi 2 - Array dengan pemadatan"; }
+
+void createBuffer(Buffer& B) {
+    B.head = -1; B.tail = -1;
+    B.nextNo = 1; B.geser = 0;
+}
+void kosongkan(Buffer& B) { B.head = -1; B.tail = -1; }
+
+int  jumlah(const Buffer& B)      { return (B.head == -1) ? 0 : B.tail - B.head + 1; }
+int  ruangKosong(const Buffer& B) { return KAPASITAS - jumlah(B); }
+
+bool enqueue(Buffer& B, int nilai) {
+    if (B.head == -1) {                                   // dari kosong
+        B.head = 0; B.tail = 0;
+    } else if (B.tail == KAPASITAS - 1) {                 // ujung kanan tercapai
+        if (B.head == 0) return false;                    // benar-benar penuh
+        int n = jumlah(B);                                // PEMADATAN: geser data aktif ke awal
+        for (int i = 0; i < n; ++i) {
+            B.data[i] = B.data[B.head + i];
+            B.geser++;                                    // 1 rekaman dipindahkan = 1 hitungan
+        }
+        B.head = 0;
+        B.tail = n;                                       // posisi tulis = n (tail baru)
+    } else {
+        B.tail++;
+    }
+    B.data[B.tail].nomor = B.nextNo++;
+    B.data[B.tail].nilai = nilai;
+    return true;
+}
+
+bool dequeue(Buffer& B, Rekaman& hasil) {
+    if (B.head == -1) return false;
+    hasil = B.data[B.head];
+    if (B.head == B.tail) { B.head = -1; B.tail = -1; }   // menjadi kosong
+    else                  { B.head++; }                   // hanya memajukan head
+    return true;
+}
+
+Rekaman elemenKe(const Buffer& B, int i) { return B.data[B.head + i]; }
+int  nomorBerikut(const Buffer& B) { return B.nextNo; }
+long totalGeser(const Buffer& B)   { return B.geser; }
+
+void printFisik(const Buffer& B) {
+    std::cout << "Fisik:";
+    for (int i = 0; i < KAPASITAS; ++i) {
+        std::cout << " [" << i << "]=";
+        if (B.head != -1 && i >= B.head && i <= B.tail)
+            std::cout << B.data[i].nomor << ":" << B.data[i].nilai;
+        else std::cout << "kosong";
+    }
+    std::cout << "\nPenanda: head = " << B.head << ", tail = " << B.tail << "\n";
+}
+
+------------------------------------------------------------------------------
+FILE: soal2/buffer_v3.cpp
+------------------------------------------------------------------------------
+// Nama: Adhwa' Zahra Prasesti  NIM: 109102500002
+// Versi 3 - CIRCULAR QUEUE: simpan head dan count saja (tanpa tail). Tidak ada pergeseran.
+#include "buffer.h"
+#include <iostream>
+#if VERSI != 3
+#error "buffer_v3.cpp harus dikompilasi dengan -DVERSI=3"
+#endif
+
+const char* namaVersi() { return "Versi 3 - Circular queue"; }
+
+void createBuffer(Buffer& B) {
+    B.head = 0; B.count = 0;
+    B.nextNo = 1; B.geser = 0;
+}
+void kosongkan(Buffer& B) { B.head = 0; B.count = 0; }
+
+int  jumlah(const Buffer& B)      { return B.count; }
+int  ruangKosong(const Buffer& B) { return KAPASITAS - B.count; }
+
+bool enqueue(Buffer& B, int nilai) {
+    if (B.count == KAPASITAS) return false;
+    int tulis = (B.head + B.count) % KAPASITAS;           // posisi tulis dihitung, bukan disimpan
+    B.data[tulis].nomor = B.nextNo++;
+    B.data[tulis].nilai = nilai;
+    B.count++;
+    return true;
+}
+
+bool dequeue(Buffer& B, Rekaman& hasil) {
+    if (B.count == 0) return false;
+    hasil = B.data[B.head];
+    B.head = (B.head + 1) % KAPASITAS;
+    B.count--;
+    if (B.count == 0) B.head = 0;                         // keadaan kosong: head = count = 0
+    return true;
+}
+
+Rekaman elemenKe(const Buffer& B, int i) { return B.data[(B.head + i) % KAPASITAS]; }
+int  nomorBerikut(const Buffer& B) { return B.nextNo; }
+long totalGeser(const Buffer& B)   { return B.geser; }    // selalu 0
+
+void printFisik(const Buffer& B) {
+    std::cout << "Fisik:";
+    for (int i = 0; i < KAPASITAS; ++i) {
+        std::cout << " [" << i << "]=";
+        int jarak = (i - B.head + KAPASITAS) % KAPASITAS; // jarak dari head searah jarum jam
+        if (jarak < B.count)
+            std::cout << B.data[i].nomor << ":" << B.data[i].nilai;
+        else std::cout << "kosong";
+    }
+    std::cout << "\nPenanda: head = " << B.head << ", count = " << B.count;
+    if (B.count > 0)
+        std::cout << " (indeks rekaman terakhir dihitung = "
+                  << (B.head + B.count - 1) % KAPASITAS << ")";
+    std::cout << "\n";
+}
+
+------------------------------------------------------------------------------
+FILE: soal2/main.cpp
+------------------------------------------------------------------------------
+// Nama: Adhwa' Zahra Prasesti  NIM: 109102500002
+// File : main.cpp  (SAMA untuk ketiga versi)
+// Pemakaian: ./vX [--echo] < input.txt
+#include <iostream>
+#include <iomanip>
+#include <string>
+#include <sstream>
+#include <cctype>
+#include "buffer.h"
+
+namespace {
+
+const int MAXTOK = 16;
+
+int splitTokens(const std::string& line, std::string tok[], int maxTok) {
+    std::istringstream iss(line);
+    std::string t;
+    int n = 0;
+    while (iss >> t) {
+        if (n < maxTok) tok[n] = t;
+        ++n;
+    }
+    return n;
+}
+
+bool parseInt(const std::string& s, long& out) {
+    if (s.empty()) return false;
+    std::size_t i = 0;
+    bool neg = false;
+    if (s[0] == '+' || s[0] == '-') { neg = (s[0] == '-'); i = 1; }
+    if (i >= s.size()) return false;
+    long v = 0;
+    int digits = 0;
+    for (; i < s.size(); ++i) {
+        if (!std::isdigit(static_cast<unsigned char>(s[i]))) return false;
+        if (v == 0 && s[i] == '0') continue;
+        if (digits < 9) v = v * 10 + (s[i] - '0');
+        ++digits;
+    }
+    if (digits > 9) v = 1000000000L;
+    out = neg ? -v : v;
+    return true;
+}
+
+void cmdTulis(Buffer& B, const std::string tok[], int n) {
+    if (n < 2) { std::cout << "DITOLAK: format TULIS k v1 ... vk\n"; return; }
+    long k;
+    if (!parseInt(tok[1], k) || k < 1 || k > KAPASITAS) {
+        std::cout << "DITOLAK: k harus bilangan bulat 1-" << KAPASITAS << "\n"; return;
+    }
+    if (n != k + 2) {
+        std::cout << "DITOLAK: jumlah nilai harus tepat k = " << k << " (diberikan " << (n - 2) << ")\n";
+        return;
+    }
+    int nilai[KAPASITAS];
+    for (long i = 0; i < k; ++i) {                        // validasi SELURUH batch dahulu
+        long v;
+        if (!parseInt(tok[2 + i], v) || v < NILAI_MIN || v > NILAI_MAX) {
+            std::cout << "DITOLAK: nilai '" << tok[2 + i] << "' di luar rentang "
+                      << NILAI_MIN << ".." << NILAI_MAX << " atau bukan bilangan bulat\n";
+            return;
+        }
+        nilai[i] = static_cast<int>(v);
+    }
+    if (ruangKosong(B) < k) {
+        std::cout << "DITOLAK: ruang kosong hanya " << ruangKosong(B) << ", diminta " << k << "\n";
+        return;
+    }
+    std::cout << "TULIS berhasil:";
+    for (long i = 0; i < k; ++i) {                        // baru sekarang antrean diubah
+        int no = nomorBerikut(B);
+        enqueue(B, nilai[i]);
+        std::cout << (i == 0 ? " " : ", ") << no << ":" << nilai[i];
+    }
+    std::cout << "\n";
+}
+
+void cmdAmbil(Buffer& B, const std::string tok[], int n) {
+    if (n != 2) { std::cout << "DITOLAK: format AMBIL k\n"; return; }
+    long k;
+    if (!parseInt(tok[1], k) || k < 1 || k > KAPASITAS) {
+        std::cout << "DITOLAK: k harus bilangan bulat 1-" << KAPASITAS << "\n"; return;
+    }
+    if (jumlah(B) < k) {
+        std::cout << "DITOLAK: data hanya " << jumlah(B) << " rekaman, diminta " << k << "\n";
+        return;
+    }
+    std::cout << "AMBIL berhasil:";
+    for (long i = 0; i < k; ++i) {
+        Rekaman r;
+        dequeue(B, r);
+        std::cout << (i == 0 ? " " : ", ") << r.nomor << ":" << r.nilai;
+    }
+    std::cout << "\n";
+}
+
+void cmdLihat(const Buffer& B) {
+    std::cout << "[" << namaVersi() << "]\n";
+    std::cout << "FIFO (" << jumlah(B) << " rekaman):";
+    if (jumlah(B) == 0) std::cout << " (kosong)";
+    for (int i = 0; i < jumlah(B); ++i) {
+        Rekaman r = elemenKe(B, i);
+        std::cout << (i == 0 ? " " : ", ") << r.nomor << ":" << r.nilai;
+    }
+    std::cout << "\n";
+    printFisik(B);
+    std::cout << "Nomor berikutnya: " << nomorBerikut(B) << "\n";
+    std::cout << "Total pergeseran: " << totalGeser(B) << " rekaman\n";
+}
+
+void cmdRingkas(const Buffer& B) {
+    int c = jumlah(B);
+    std::cout << "RINGKAS: jumlah " << c;
+    if (c == 0) {
+        std::cout << "; total 0; minimum TIDAK ADA; maksimum TIDAK ADA; rata-rata TIDAK ADA\n";
+        return;
+    }
+    long total = 0;
+    int mn = elemenKe(B, 0).nilai, mx = mn;
+    for (int i = 0; i < c; ++i) {                         // hanya membaca, queue tidak berubah
+        int v = elemenKe(B, i).nilai;
+        total += v;
+        if (v < mn) mn = v;
+        if (v > mx) mx = v;
+    }
+    std::cout << "; total " << total << "; minimum " << mn << "; maksimum " << mx
+              << "; rata-rata " << std::fixed << std::setprecision(2)
+              << static_cast<double>(total) / c << "\n";
+    std::cout.unsetf(std::ios::floatfield);
+}
+
+} // namespace
+
+int main(int argc, char* argv[]) {
+    bool echo = false;
+    for (int i = 1; i < argc; ++i)
+        if (std::string(argv[i]) == "--echo") echo = true;
+
+    Buffer B;
+    createBuffer(B);
+
+    std::cout << "=== Buffer Hasil Ukur (kapasitas " << KAPASITAS << ") - " << namaVersi() << " ===\n"
+              << "Perintah: TULIS k v1..vk | AMBIL k | LIHAT | RINGKAS | KOSONGKAN | SELESAI\n";
+
+    std::string line;
+    while (std::getline(std::cin, line)) {
+        if (!line.empty() && line.back() == '\r') line.pop_back();
+        std::string tok[MAXTOK];
+        int n = splitTokens(line, tok, MAXTOK);
+        if (n == 0) continue;
+        if (tok[0][0] == '#') { if (echo) std::cout << line << "\n"; continue; }
+        if (echo) std::cout << "> " << line << "\n";
+
+        std::string cmd = tok[0];
+        for (std::size_t i = 0; i < cmd.size(); ++i)
+            cmd[i] = static_cast<char>(std::toupper(static_cast<unsigned char>(cmd[i])));
+
+        if      (cmd == "TULIS")     cmdTulis(B, tok, n);
+        else if (cmd == "AMBIL")     cmdAmbil(B, tok, n);
+        else if (cmd == "LIHAT")     cmdLihat(B);
+        else if (cmd == "RINGKAS")   cmdRingkas(B);
+        else if (cmd == "KOSONGKAN") { kosongkan(B); std::cout << "KOSONGKAN: buffer dikosongkan (nomor urut & penghitung pergeseran dipertahankan)\n"; }
+        else if (cmd == "SELESAI")   { std::cout << "SELESAI. Program berakhir.\n"; break; }
+        else std::cout << "DITOLAK: perintah tidak dikenal\n";
+    }
+    return 0;
+}
+
+==============================================================================
+BAGIAN E. MASUKAN DAN KELUARAN SELURUH UJI
+==============================================================================
+
+---- E.1 Masukan Soal 1 (uji_soal1.txt) ----
+# ===== C. URUTAN UJI UTAMA =====
+REKAP
+MASUK P17 450
+MASUK P28 700
+MASUK P36 550
+LIHAT
+ALAMAT P17
+PINDAH 2
+ALAMAT P17
+LIHAT
+REKAP
+MASUK P42 600
+LIHAT
+PINDAH 3
+LIHAT
+PINDAH 1
+LIHAT
+KIRIM 2
+LIHAT
+CARI P36
+KIRIM 2
+PINDAH 1
+LIHAT
+KIRIM 2
+LIHAT
+REKAP
+CEK
+# ===== D.1 UJI TAMBAHAN: PENOLAKAN TIDAK MENGUBAH KEADAAN =====
+MASUK P60 100
+MASUK P60 200
+PINDAH 1
+MASUK P60 300
+MASUK P61 0
+MASUK P61 5001
+MASUK P61 abc
+MASUK KODEPANJANG1 100
+MASUK P61
+PINDAH 0
+PINDAH -2
+PINDAH abc
+KIRIM 0
+PINDAH 1
+CARI X99
+LIHAT
+REKAP
+CEK
+# ===== D.2 P55, PINDAH, BERSIHKAN, ISI ULANG =====
+MASUK P55 800
+PINDAH 1
+LIHAT
+BERSIHKAN
+LIHAT
+REKAP
+CEK
+MASUK P17 450
+MASUK P55 800
+PINDAH 2
+CARI P55
+KIRIM 1
+LIHAT
+REKAP
+CEK
+SELESAI
+
+---- E.2 Keluaran Soal 1 (hasil_soal1.txt) ----
+=== Sistem Sortir & Pengiriman Paket ===
+Perintah: MASUK kode berat | PINDAH n | KIRIM n | CARI kode | LIHAT | REKAP
+          BERSIHKAN | SELESAI   (tambahan: ALAMAT kode, CEK)
+# ===== C. URUTAN UJI UTAMA =====
+> REKAP
+REKAP
+  A        : 0 paket, total berat 0 gram
+  B        : 0 paket, total berat 0 gram
+  Terkirim : 0 paket, total berat 0 gram
+> MASUK P17 450
+MASUK berhasil: P17 (450 gram) di belakang A
+> MASUK P28 700
+MASUK berhasil: P28 (700 gram) di belakang A
+> MASUK P36 550
+MASUK berhasil: P36 (550 gram) di belakang A
+> LIHAT
+Antrean A: P17(450g) -> P28(700g) -> P36(550g)
+Antrean B: (kosong)
+> ALAMAT P17
+Alamat node P17 = 0x504000000050 | fFindElm(A) = ya | fFindElm(B) = tidak
+> PINDAH 2
+PINDAH berhasil: 2 paket A -> B: P17, P28
+> ALAMAT P17
+Alamat node P17 = 0x504000000050 | fFindElm(A) = tidak | fFindElm(B) = ya
+> LIHAT
+Antrean A: P36(550g)
+Antrean B: P17(450g) -> P28(700g)
+> REKAP
+REKAP
+  A        : 1 paket, total berat 550 gram
+  B        : 2 paket, total berat 1150 gram
+  Terkirim : 0 paket, total berat 0 gram
+> MASUK P42 600
+MASUK berhasil: P42 (600 gram) di belakang A
+> LIHAT
+Antrean A: P36(550g) -> P42(600g)
+Antrean B: P17(450g) -> P28(700g)
+> PINDAH 3
+DITOLAK: PINDAH 3 melebihi isi A (A hanya berisi 2 paket)
+> LIHAT
+Antrean A: P36(550g) -> P42(600g)
+Antrean B: P17(450g) -> P28(700g)
+> PINDAH 1
+PINDAH berhasil: 1 paket A -> B: P36
+> LIHAT
+Antrean A: P42(600g)
+Antrean B: P17(450g) -> P28(700g) -> P36(550g)
+> KIRIM 2
+Dikirim: P17 (450 gram)
+Dikirim: P28 (700 gram)
+KIRIM berhasil: 2 paket, 1150 gram. Total terkirim: 2 paket, 1150 gram
+> LIHAT
+Antrean A: P42(600g)
+Antrean B: P36(550g)
+> CARI P36
+Ditemukan: P36 di B, posisi 1, berat 550 gram
+> KIRIM 2
+DITOLAK: KIRIM 2 melebihi isi B (B hanya berisi 1 paket)
+> PINDAH 1
+PINDAH berhasil: 1 paket A -> B: P42
+> LIHAT
+Antrean A: (kosong)
+Antrean B: P36(550g) -> P42(600g)
+> KIRIM 2
+Dikirim: P36 (550 gram)
+Dikirim: P42 (600 gram)
+KIRIM berhasil: 2 paket, 1150 gram. Total terkirim: 4 paket, 2300 gram
+> LIHAT
+Antrean A: (kosong)
+Antrean B: (kosong)
+> REKAP
+REKAP
+  A        : 0 paket, total berat 0 gram
+  B        : 0 paket, total berat 0 gram
+  Terkirim : 4 paket, total berat 2300 gram
+> CEK
+CEK invarian (head/tail, tail->next, keanggotaan tunggal): OK
+# ===== D.1 UJI TAMBAHAN: PENOLAKAN TIDAK MENGUBAH KEADAAN =====
+> MASUK P60 100
+MASUK berhasil: P60 (100 gram) di belakang A
+> MASUK P60 200
+DITOLAK: kode P60 masih aktif di antrean A
+> PINDAH 1
+PINDAH berhasil: 1 paket A -> B: P60
+> MASUK P60 300
+DITOLAK: kode P60 masih aktif di antrean B
+> MASUK P61 0
+DITOLAK: berat harus bilangan bulat 1-5000 gram
+> MASUK P61 5001
+DITOLAK: berat harus bilangan bulat 1-5000 gram
+> MASUK P61 abc
+DITOLAK: berat harus bilangan bulat 1-5000 gram
+> MASUK KODEPANJANG1 100
+DITOLAK: kode harus 1-10 karakter
+> MASUK P61
+DITOLAK: format MASUK kode berat
+> PINDAH 0
+DITOLAK: n harus bilangan bulat positif
+> PINDAH -2
+DITOLAK: n harus bilangan bulat positif
+> PINDAH abc
+DITOLAK: n harus bilangan bulat positif
+> KIRIM 0
+DITOLAK: n harus bilangan bulat positif
+> PINDAH 1
+DITOLAK: PINDAH 1 melebihi isi A (A hanya berisi 0 paket)
+> CARI X99
+TIDAK DITEMUKAN
+> LIHAT
+Antrean A: (kosong)
+Antrean B: P60(100g)
+> REKAP
+REKAP
+  A        : 0 paket, total berat 0 gram
+  B        : 1 paket, total berat 100 gram
+  Terkirim : 4 paket, total berat 2300 gram
+> CEK
+CEK invarian (head/tail, tail->next, keanggotaan tunggal): OK
+# ===== D.2 P55, PINDAH, BERSIHKAN, ISI ULANG =====
+> MASUK P55 800
+MASUK berhasil: P55 (800 gram) di belakang A
+> PINDAH 1
+PINDAH berhasil: 1 paket A -> B: P55
+> LIHAT
+Antrean A: (kosong)
+Antrean B: P60(100g) -> P55(800g)
+> BERSIHKAN
+BERSIHKAN: 0 paket dari A dan 2 paket dari B dihapus (statistik terkirim tidak berubah)
+> LIHAT
+Antrean A: (kosong)
+Antrean B: (kosong)
+> REKAP
+REKAP
+  A        : 0 paket, total berat 0 gram
+  B        : 0 paket, total berat 0 gram
+  Terkirim : 4 paket, total berat 2300 gram
+> CEK
+CEK invarian (head/tail, tail->next, keanggotaan tunggal): OK
+> MASUK P17 450
+MASUK berhasil: P17 (450 gram) di belakang A
+> MASUK P55 800
+MASUK berhasil: P55 (800 gram) di belakang A
+> PINDAH 2
+PINDAH berhasil: 2 paket A -> B: P17, P55
+> CARI P55
+Ditemukan: P55 di B, posisi 2, berat 800 gram
+> KIRIM 1
+Dikirim: P17 (450 gram)
+KIRIM berhasil: 1 paket, 450 gram. Total terkirim: 5 paket, 2750 gram
+> LIHAT
+Antrean A: (kosong)
+Antrean B: P55(800g)
+> REKAP
+REKAP
+  A        : 0 paket, total berat 0 gram
+  B        : 1 paket, total berat 800 gram
+  Terkirim : 5 paket, total berat 2750 gram
+> CEK
+CEK invarian (head/tail, tail->next, keanggotaan tunggal): OK
+> SELESAI
+SELESAI: 1 node sisa dibebaskan. Program berakhir.
+
+---- E.3 Masukan Soal 2 (uji_soal2.txt), dipakai untuk ketiga versi ----
+# ===== D. URUTAN UJI UTAMA =====
+TULIS 6 12 -4 7 0 15 6
+AMBIL 2
+TULIS 3 9 11 -2
+TULIS 2 9 -2
+RINGKAS
+# ===== E. POSISI FISIK & BIAYA PERGESERAN (9 / 4 / 0) =====
+LIHAT
+# ===== F.1 AMBIL 7, AMBIL 6, AMBIL 1 =====
+AMBIL 7
+LIHAT
+AMBIL 6
+AMBIL 1
+RINGKAS
+# ===== F.2 TULIS NILAI DI LUAR RENTANG LALU TULIS 1 -1 =====
+TULIS 2 4 1001
+LIHAT
+TULIS 1 -1
+LIHAT
+# ===== F.3 KOSONGKAN, ISI ULANG =====
+KOSONGKAN
+LIHAT
+RINGKAS
+TULIS 4 10 20 30 40
+AMBIL 3
+TULIS 5 1 2 3 4 5
+LIHAT
+RINGKAS
+# ===== UJI VALIDASI TAMBAHAN =====
+TULIS 0
+TULIS 7 1 2 3 4 5 6 7
+TULIS 2 5
+TULIS 1 abc
+TULIS 1 -1000
+AMBIL 0
+AMBIL abc
+LIHAT
+SELESAI
+
+---- E.4 Keluaran Soal 2 Versi 1 (hasil_soal2_v1.txt) ----
+=== Buffer Hasil Ukur (kapasitas 6) - Versi 1 - Array geser ===
+Perintah: TULIS k v1..vk | AMBIL k | LIHAT | RINGKAS | KOSONGKAN | SELESAI
+# ===== D. URUTAN UJI UTAMA =====
+> TULIS 6 12 -4 7 0 15 6
+TULIS berhasil: 1:12, 2:-4, 3:7, 4:0, 5:15, 6:6
+> AMBIL 2
+AMBIL berhasil: 1:12, 2:-4
+> TULIS 3 9 11 -2
+DITOLAK: ruang kosong hanya 2, diminta 3
+> TULIS 2 9 -2
+TULIS berhasil: 7:9, 8:-2
+> RINGKAS
+RINGKAS: jumlah 6; total 35; minimum -2; maksimum 15; rata-rata 5.83
+# ===== E. POSISI FISIK & BIAYA PERGESERAN (9 / 4 / 0) =====
+> LIHAT
+[Versi 1 - Array geser]
+FIFO (6 rekaman): 3:7, 4:0, 5:15, 6:6, 7:9, 8:-2
+Fisik: [0]=3:7 [1]=4:0 [2]=5:15 [3]=6:6 [4]=7:9 [5]=8:-2
+Penanda: head = 0, tail = 5
+Nomor berikutnya: 9
+Total pergeseran: 9 rekaman
+# ===== F.1 AMBIL 7, AMBIL 6, AMBIL 1 =====
+> AMBIL 7
+DITOLAK: k harus bilangan bulat 1-6
+> LIHAT
+[Versi 1 - Array geser]
+FIFO (6 rekaman): 3:7, 4:0, 5:15, 6:6, 7:9, 8:-2
+Fisik: [0]=3:7 [1]=4:0 [2]=5:15 [3]=6:6 [4]=7:9 [5]=8:-2
+Penanda: head = 0, tail = 5
+Nomor berikutnya: 9
+Total pergeseran: 9 rekaman
+> AMBIL 6
+AMBIL berhasil: 3:7, 4:0, 5:15, 6:6, 7:9, 8:-2
+> AMBIL 1
+DITOLAK: data hanya 0 rekaman, diminta 1
+> RINGKAS
+RINGKAS: jumlah 0; total 0; minimum TIDAK ADA; maksimum TIDAK ADA; rata-rata TIDAK ADA
+# ===== F.2 TULIS NILAI DI LUAR RENTANG LALU TULIS 1 -1 =====
+> TULIS 2 4 1001
+DITOLAK: nilai '1001' di luar rentang -1000..1000 atau bukan bilangan bulat
+> LIHAT
+[Versi 1 - Array geser]
+FIFO (0 rekaman): (kosong)
+Fisik: [0]=kosong [1]=kosong [2]=kosong [3]=kosong [4]=kosong [5]=kosong
+Penanda: head = -1, tail = -1
+Nomor berikutnya: 9
+Total pergeseran: 24 rekaman
+> TULIS 1 -1
+TULIS berhasil: 9:-1
+> LIHAT
+[Versi 1 - Array geser]
+FIFO (1 rekaman): 9:-1
+Fisik: [0]=9:-1 [1]=kosong [2]=kosong [3]=kosong [4]=kosong [5]=kosong
+Penanda: head = 0, tail = 0
+Nomor berikutnya: 10
+Total pergeseran: 24 rekaman
+# ===== F.3 KOSONGKAN, ISI ULANG =====
+> KOSONGKAN
+KOSONGKAN: buffer dikosongkan (nomor urut & penghitung pergeseran dipertahankan)
+> LIHAT
+[Versi 1 - Array geser]
+FIFO (0 rekaman): (kosong)
+Fisik: [0]=kosong [1]=kosong [2]=kosong [3]=kosong [4]=kosong [5]=kosong
+Penanda: head = -1, tail = -1
+Nomor berikutnya: 10
+Total pergeseran: 24 rekaman
+> RINGKAS
+RINGKAS: jumlah 0; total 0; minimum TIDAK ADA; maksimum TIDAK ADA; rata-rata TIDAK ADA
+> TULIS 4 10 20 30 40
+TULIS berhasil: 10:10, 11:20, 12:30, 13:40
+> AMBIL 3
+AMBIL berhasil: 10:10, 11:20, 12:30
+> TULIS 5 1 2 3 4 5
+TULIS berhasil: 14:1, 15:2, 16:3, 17:4, 18:5
+> LIHAT
+[Versi 1 - Array geser]
+FIFO (6 rekaman): 13:40, 14:1, 15:2, 16:3, 17:4, 18:5
+Fisik: [0]=13:40 [1]=14:1 [2]=15:2 [3]=16:3 [4]=17:4 [5]=18:5
+Penanda: head = 0, tail = 5
+Nomor berikutnya: 19
+Total pergeseran: 30 rekaman
+> RINGKAS
+RINGKAS: jumlah 6; total 55; minimum 1; maksimum 40; rata-rata 9.17
+# ===== UJI VALIDASI TAMBAHAN =====
+> TULIS 0
+DITOLAK: k harus bilangan bulat 1-6
+> TULIS 7 1 2 3 4 5 6 7
+DITOLAK: k harus bilangan bulat 1-6
+> TULIS 2 5
+DITOLAK: jumlah nilai harus tepat k = 2 (diberikan 1)
+> TULIS 1 abc
+DITOLAK: nilai 'abc' di luar rentang -1000..1000 atau bukan bilangan bulat
+> TULIS 1 -1000
+DITOLAK: ruang kosong hanya 0, diminta 1
+> AMBIL 0
+DITOLAK: k harus bilangan bulat 1-6
+> AMBIL abc
+DITOLAK: k harus bilangan bulat 1-6
+> LIHAT
+[Versi 1 - Array geser]
+FIFO (6 rekaman): 13:40, 14:1, 15:2, 16:3, 17:4, 18:5
+Fisik: [0]=13:40 [1]=14:1 [2]=15:2 [3]=16:3 [4]=17:4 [5]=18:5
+Penanda: head = 0, tail = 5
+Nomor berikutnya: 19
+Total pergeseran: 30 rekaman
+> SELESAI
+SELESAI. Program berakhir.
+
+---- E.5 Keluaran Soal 2 Versi 2 (hasil_soal2_v2.txt) ----
+=== Buffer Hasil Ukur (kapasitas 6) - Versi 2 - Array dengan pemadatan ===
+Perintah: TULIS k v1..vk | AMBIL k | LIHAT | RINGKAS | KOSONGKAN | SELESAI
+# ===== D. URUTAN UJI UTAMA =====
+> TULIS 6 12 -4 7 0 15 6
+TULIS berhasil: 1:12, 2:-4, 3:7, 4:0, 5:15, 6:6
+> AMBIL 2
+AMBIL berhasil: 1:12, 2:-4
+> TULIS 3 9 11 -2
+DITOLAK: ruang kosong hanya 2, diminta 3
+> TULIS 2 9 -2
+TULIS berhasil: 7:9, 8:-2
+> RINGKAS
+RINGKAS: jumlah 6; total 35; minimum -2; maksimum 15; rata-rata 5.83
+# ===== E. POSISI FISIK & BIAYA PERGESERAN (9 / 4 / 0) =====
+> LIHAT
+[Versi 2 - Array dengan pemadatan]
+FIFO (6 rekaman): 3:7, 4:0, 5:15, 6:6, 7:9, 8:-2
+Fisik: [0]=3:7 [1]=4:0 [2]=5:15 [3]=6:6 [4]=7:9 [5]=8:-2
+Penanda: head = 0, tail = 5
+Nomor berikutnya: 9
+Total pergeseran: 4 rekaman
+# ===== F.1 AMBIL 7, AMBIL 6, AMBIL 1 =====
+> AMBIL 7
+DITOLAK: k harus bilangan bulat 1-6
+> LIHAT
+[Versi 2 - Array dengan pemadatan]
+FIFO (6 rekaman): 3:7, 4:0, 5:15, 6:6, 7:9, 8:-2
+Fisik: [0]=3:7 [1]=4:0 [2]=5:15 [3]=6:6 [4]=7:9 [5]=8:-2
+Penanda: head = 0, tail = 5
+Nomor berikutnya: 9
+Total pergeseran: 4 rekaman
+> AMBIL 6
+AMBIL berhasil: 3:7, 4:0, 5:15, 6:6, 7:9, 8:-2
+> AMBIL 1
+DITOLAK: data hanya 0 rekaman, diminta 1
+> RINGKAS
+RINGKAS: jumlah 0; total 0; minimum TIDAK ADA; maksimum TIDAK ADA; rata-rata TIDAK ADA
+# ===== F.2 TULIS NILAI DI LUAR RENTANG LALU TULIS 1 -1 =====
+> TULIS 2 4 1001
+DITOLAK: nilai '1001' di luar rentang -1000..1000 atau bukan bilangan bulat
+> LIHAT
+[Versi 2 - Array dengan pemadatan]
+FIFO (0 rekaman): (kosong)
+Fisik: [0]=kosong [1]=kosong [2]=kosong [3]=kosong [4]=kosong [5]=kosong
+Penanda: head = -1, tail = -1
+Nomor berikutnya: 9
+Total pergeseran: 4 rekaman
+> TULIS 1 -1
+TULIS berhasil: 9:-1
+> LIHAT
+[Versi 2 - Array dengan pemadatan]
+FIFO (1 rekaman): 9:-1
+Fisik: [0]=9:-1 [1]=kosong [2]=kosong [3]=kosong [4]=kosong [5]=kosong
+Penanda: head = 0, tail = 0
+Nomor berikutnya: 10
+Total pergeseran: 4 rekaman
+# ===== F.3 KOSONGKAN, ISI ULANG =====
+> KOSONGKAN
+KOSONGKAN: buffer dikosongkan (nomor urut & penghitung pergeseran dipertahankan)
+> LIHAT
+[Versi 2 - Array dengan pemadatan]
+FIFO (0 rekaman): (kosong)
+Fisik: [0]=kosong [1]=kosong [2]=kosong [3]=kosong [4]=kosong [5]=kosong
+Penanda: head = -1, tail = -1
+Nomor berikutnya: 10
+Total pergeseran: 4 rekaman
+> RINGKAS
+RINGKAS: jumlah 0; total 0; minimum TIDAK ADA; maksimum TIDAK ADA; rata-rata TIDAK ADA
+> TULIS 4 10 20 30 40
+TULIS berhasil: 10:10, 11:20, 12:30, 13:40
+> AMBIL 3
+AMBIL berhasil: 10:10, 11:20, 12:30
+> TULIS 5 1 2 3 4 5
+TULIS berhasil: 14:1, 15:2, 16:3, 17:4, 18:5
+> LIHAT
+[Versi 2 - Array dengan pemadatan]
+FIFO (6 rekaman): 13:40, 14:1, 15:2, 16:3, 17:4, 18:5
+Fisik: [0]=13:40 [1]=14:1 [2]=15:2 [3]=16:3 [4]=17:4 [5]=18:5
+Penanda: head = 0, tail = 5
+Nomor berikutnya: 19
+Total pergeseran: 7 rekaman
+> RINGKAS
+RINGKAS: jumlah 6; total 55; minimum 1; maksimum 40; rata-rata 9.17
+# ===== UJI VALIDASI TAMBAHAN =====
+> TULIS 0
+DITOLAK: k harus bilangan bulat 1-6
+> TULIS 7 1 2 3 4 5 6 7
+DITOLAK: k harus bilangan bulat 1-6
+> TULIS 2 5
+DITOLAK: jumlah nilai harus tepat k = 2 (diberikan 1)
+> TULIS 1 abc
+DITOLAK: nilai 'abc' di luar rentang -1000..1000 atau bukan bilangan bulat
+> TULIS 1 -1000
+DITOLAK: ruang kosong hanya 0, diminta 1
+> AMBIL 0
+DITOLAK: k harus bilangan bulat 1-6
+> AMBIL abc
+DITOLAK: k harus bilangan bulat 1-6
+> LIHAT
+[Versi 2 - Array dengan pemadatan]
+FIFO (6 rekaman): 13:40, 14:1, 15:2, 16:3, 17:4, 18:5
+Fisik: [0]=13:40 [1]=14:1 [2]=15:2 [3]=16:3 [4]=17:4 [5]=18:5
+Penanda: head = 0, tail = 5
+Nomor berikutnya: 19
+Total pergeseran: 7 rekaman
+> SELESAI
+SELESAI. Program berakhir.
+
+---- E.6 Keluaran Soal 2 Versi 3 (hasil_soal2_v3.txt) ----
+=== Buffer Hasil Ukur (kapasitas 6) - Versi 3 - Circular queue ===
+Perintah: TULIS k v1..vk | AMBIL k | LIHAT | RINGKAS | KOSONGKAN | SELESAI
+# ===== D. URUTAN UJI UTAMA =====
+> TULIS 6 12 -4 7 0 15 6
+TULIS berhasil: 1:12, 2:-4, 3:7, 4:0, 5:15, 6:6
+> AMBIL 2
+AMBIL berhasil: 1:12, 2:-4
+> TULIS 3 9 11 -2
+DITOLAK: ruang kosong hanya 2, diminta 3
+> TULIS 2 9 -2
+TULIS berhasil: 7:9, 8:-2
+> RINGKAS
+RINGKAS: jumlah 6; total 35; minimum -2; maksimum 15; rata-rata 5.83
+# ===== E. POSISI FISIK & BIAYA PERGESERAN (9 / 4 / 0) =====
+> LIHAT
+[Versi 3 - Circular queue]
+FIFO (6 rekaman): 3:7, 4:0, 5:15, 6:6, 7:9, 8:-2
+Fisik: [0]=7:9 [1]=8:-2 [2]=3:7 [3]=4:0 [4]=5:15 [5]=6:6
+Penanda: head = 2, count = 6 (indeks rekaman terakhir dihitung = 1)
+Nomor berikutnya: 9
+Total pergeseran: 0 rekaman
+# ===== F.1 AMBIL 7, AMBIL 6, AMBIL 1 =====
+> AMBIL 7
+DITOLAK: k harus bilangan bulat 1-6
+> LIHAT
+[Versi 3 - Circular queue]
+FIFO (6 rekaman): 3:7, 4:0, 5:15, 6:6, 7:9, 8:-2
+Fisik: [0]=7:9 [1]=8:-2 [2]=3:7 [3]=4:0 [4]=5:15 [5]=6:6
+Penanda: head = 2, count = 6 (indeks rekaman terakhir dihitung = 1)
+Nomor berikutnya: 9
+Total pergeseran: 0 rekaman
+> AMBIL 6
+AMBIL berhasil: 3:7, 4:0, 5:15, 6:6, 7:9, 8:-2
+> AMBIL 1
+DITOLAK: data hanya 0 rekaman, diminta 1
+> RINGKAS
+RINGKAS: jumlah 0; total 0; minimum TIDAK ADA; maksimum TIDAK ADA; rata-rata TIDAK ADA
+# ===== F.2 TULIS NILAI DI LUAR RENTANG LALU TULIS 1 -1 =====
+> TULIS 2 4 1001
+DITOLAK: nilai '1001' di luar rentang -1000..1000 atau bukan bilangan bulat
+> LIHAT
+[Versi 3 - Circular queue]
+FIFO (0 rekaman): (kosong)
+Fisik: [0]=kosong [1]=kosong [2]=kosong [3]=kosong [4]=kosong [5]=kosong
+Penanda: head = 0, count = 0
+Nomor berikutnya: 9
+Total pergeseran: 0 rekaman
+> TULIS 1 -1
+TULIS berhasil: 9:-1
+> LIHAT
+[Versi 3 - Circular queue]
+FIFO (1 rekaman): 9:-1
+Fisik: [0]=9:-1 [1]=kosong [2]=kosong [3]=kosong [4]=kosong [5]=kosong
+Penanda: head = 0, count = 1 (indeks rekaman terakhir dihitung = 0)
+Nomor berikutnya: 10
+Total pergeseran: 0 rekaman
+# ===== F.3 KOSONGKAN, ISI ULANG =====
+> KOSONGKAN
+KOSONGKAN: buffer dikosongkan (nomor urut & penghitung pergeseran dipertahankan)
+> LIHAT
+[Versi 3 - Circular queue]
+FIFO (0 rekaman): (kosong)
+Fisik: [0]=kosong [1]=kosong [2]=kosong [3]=kosong [4]=kosong [5]=kosong
+Penanda: head = 0, count = 0
+Nomor berikutnya: 10
+Total pergeseran: 0 rekaman
+> RINGKAS
+RINGKAS: jumlah 0; total 0; minimum TIDAK ADA; maksimum TIDAK ADA; rata-rata TIDAK ADA
+> TULIS 4 10 20 30 40
+TULIS berhasil: 10:10, 11:20, 12:30, 13:40
+> AMBIL 3
+AMBIL berhasil: 10:10, 11:20, 12:30
+> TULIS 5 1 2 3 4 5
+TULIS berhasil: 14:1, 15:2, 16:3, 17:4, 18:5
+> LIHAT
+[Versi 3 - Circular queue]
+FIFO (6 rekaman): 13:40, 14:1, 15:2, 16:3, 17:4, 18:5
+Fisik: [0]=16:3 [1]=17:4 [2]=18:5 [3]=13:40 [4]=14:1 [5]=15:2
+Penanda: head = 3, count = 6 (indeks rekaman terakhir dihitung = 2)
+Nomor berikutnya: 19
+Total pergeseran: 0 rekaman
+> RINGKAS
+RINGKAS: jumlah 6; total 55; minimum 1; maksimum 40; rata-rata 9.17
+# ===== UJI VALIDASI TAMBAHAN =====
+> TULIS 0
+DITOLAK: k harus bilangan bulat 1-6
+> TULIS 7 1 2 3 4 5 6 7
+DITOLAK: k harus bilangan bulat 1-6
+> TULIS 2 5
+DITOLAK: jumlah nilai harus tepat k = 2 (diberikan 1)
+> TULIS 1 abc
+DITOLAK: nilai 'abc' di luar rentang -1000..1000 atau bukan bilangan bulat
+> TULIS 1 -1000
+DITOLAK: ruang kosong hanya 0, diminta 1
+> AMBIL 0
+DITOLAK: k harus bilangan bulat 1-6
+> AMBIL abc
+DITOLAK: k harus bilangan bulat 1-6
+> LIHAT
+[Versi 3 - Circular queue]
+FIFO (6 rekaman): 13:40, 14:1, 15:2, 16:3, 17:4, 18:5
+Fisik: [0]=16:3 [1]=17:4 [2]=18:5 [3]=13:40 [4]=14:1 [5]=15:2
+Penanda: head = 3, count = 6 (indeks rekaman terakhir dihitung = 2)
+Nomor berikutnya: 19
+Total pergeseran: 0 rekaman
+> SELESAI
+SELESAI. Program berakhir.
+
+---- E.7 Perbandingan otomatis ketiga versi (perbandingan_soal2.txt) ----
+UJI TERTULIS: keluaran v1 = v2 = v3 (IDENTIK)
+Uji acak 300 skenario: SEMUA IDENTIK, tanpa error ASan/UBSan
+
+==============================================================================
+BAGIAN F. CARA KOMPILASI (Windows PowerShell / g++)
+==============================================================================
+
+Soal 1 (masuk ke folder soal1):
+    g++ -std=c++17 main.cpp paket.cpp -o paket
+    .\paket.exe
+    Get-Content uji_soal1.txt | .\paket.exe --echo
+
+Soal 2 (masuk ke folder soal2):
+    g++ -std=c++17 -DVERSI=1 main.cpp buffer_v1.cpp -o v1
+    g++ -std=c++17 -DVERSI=2 main.cpp buffer_v2.cpp -o v2
+    g++ -std=c++17 -DVERSI=3 main.cpp buffer_v3.cpp -o v3
+    Get-Content uji_soal2.txt | .\v1.exe --echo
+
+Opsi --echo hanya mencetak ulang perintah supaya log uji mudah dibaca.
